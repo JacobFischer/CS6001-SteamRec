@@ -8,6 +8,7 @@ const FILES_DIR = './curators_apps/';
 var text = fs.readFileSync(process.argv[2] || "./curators.txt").toString();
 var textByLine = text.split("\n");
 const jquery = {}; // way to pass jquery around after it's loaded
+let badCurators = [];
 
 // main entry point, tries to asynchronously generate a file
 function generateFile(index, callback) {
@@ -21,14 +22,19 @@ function generateFile(index, callback) {
   const filepath = `${FILES_DIR}${curatorID}.json`;
   fs.access(filepath, fs.constants.R_OK, (err) => {
     if(!err || err.code !== 'ENOENT') {
+      if(err) {
+        console.log(`${curatorID} had some problem accessing file`);
+        badCurators.push(curatorID);
+      }
       // skip, file exists or some other found
       console.log(`${index}: Skipping ${curatorID}`);
       generateFile(index + 1, callback)
     }
     else { // err.code === 'ENOENT'
-      getCuratorsApps(curatorID, function(ids) {
-        console.log(`${index}: Generated file for ${curatorID}`);
-        fs.writeFile(filepath, JSON.stringify(ids), 'utf8', function() {
+      console.log(`${index}: Generating file for ${curatorID}`);
+      getCuratorsApps(curatorID, function(name, list) {
+        console.log(`  -> Writing file for ${name}`);
+        fs.writeFile(filepath, JSON.stringify({name, list}), 'utf8', function() {
           generateFile(index + 1, callback);
         });
       });
@@ -41,11 +47,16 @@ function getSomeIDs(curatorID, index, callback) {
   request(`${URL}${curatorID}/?start=${index}&count=${COUNT_BY}`, function(error, response, body) {
       const parsed = JSON.parse(body)
       const html = jquery.$(parsed.results_html);
-      const found = html.find("div[data-ds-appid]");
+      const found = html.find('div[data-ds-appid]');
       let ids = [];
 
       for(let i = 0; i < found.length; i++) {
-          ids.push(jquery.$(found[i]).attr('data-ds-appid'))
+        const $found = jquery.$(found[i]);
+        ids.push({
+          appid: $found.attr('data-ds-appid'),
+          recommended: $found.find('.color_recommended').length > 0, // if this span is found, they recommended it
+          info: $found.find('.color_informational').length > 0, // if this span is found, it's an info post
+        });
       }
 
       callback(ids);
@@ -55,8 +66,8 @@ function getSomeIDs(curatorID, index, callback) {
 function getAllIDs(curatorID, i, list, callback) {
   getSomeIDs(curatorID, i * COUNT_BY, function(ids) {
     if (ids.length === 0) {
-      // found no ids, so we are done
-      callback(list);
+      // found no ids, so we are done, now get the name
+      getCuratorsName(curatorID, (name) => callback(name, list));
     }
     else {
       // we found some ids, add them then do this again
@@ -68,7 +79,14 @@ function getAllIDs(curatorID, i, list, callback) {
 
 function getCuratorsApps(curatorID, callback) {
   getAllIDs(curatorID, 0, [], callback);
-};
+}
+
+function getCuratorsName(curatorID, callback) {
+  request(`http://store.steampowered.com/curator/${curatorID}/`, (error, response, body) => {
+    const html = jquery.$(body);
+    callback(html.find('h2.curator_name a').html());
+  });
+}
 
 // now actually do the thing
 require("jsdom").env("", function(err, window) {
@@ -82,7 +100,11 @@ require("jsdom").env("", function(err, window) {
 
     generateFile(0, function() {
       console.log('DONE!');
+      if (badCurators.length > 0) {
+        console.log('Bad Curators:');
+        for (const curatorID of badCurators) {
+          console.log(curatorID);
+        }
+      }
     })
 });
-
-// TODO: use as function for variable curator id, start, and count
