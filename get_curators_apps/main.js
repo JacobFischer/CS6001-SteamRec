@@ -1,14 +1,20 @@
 const fs = require('fs');
 const request = require('request');
+const moment = require('moment');
 
 const URL = 'http://store.steampowered.com/curators/ajaxgetcuratorrecommendations/';
 const COUNT_BY = 50;
 const FILES_DIR = './curators_apps/';
+const CURRENT_YEAR = (new Date()).getFullYear();
 
-var text = fs.readFileSync(process.argv[2] || "./curators.txt").toString();
-var textByLine = text.split("\n");
+let text = fs.readFileSync(process.argv[2] || './curators.txt').toString();
+let textByLine = text.split('\n');
 const jquery = {}; // way to pass jquery around after it's loaded
 let badCurators = [];
+
+function pad(str) {
+  return (str.length === 1 ? '0' : '') + str;
+}
 
 // main entry point, tries to asynchronously generate a file
 function generateFile(index, callback) {
@@ -45,21 +51,37 @@ function generateFile(index, callback) {
 
 function getSomeIDs(curatorID, index, callback) {
   request(`${URL}${curatorID}/?start=${index}&count=${COUNT_BY}`, function(error, response, body) {
-      const parsed = JSON.parse(body)
-      const html = jquery.$(parsed.results_html);
-      const found = html.find('div[data-ds-appid]');
-      let ids = [];
+    const parsed = JSON.parse(body)
+    const html = jquery.$(parsed.results_html);
+    const found = html.find('div[data-ds-appid]');
+    let ids = [];
 
-      for(let i = 0; i < found.length; i++) {
-        const $found = jquery.$(found[i]);
-        ids.push({
-          appid: $found.attr('data-ds-appid'),
-          recommended: $found.find('.color_recommended').length > 0, // if this span is found, they recommended it
-          info: $found.find('.color_informational').length > 0, // if this span is found, it's an info post
-        });
+    for(let i = 0; i < found.length; i++) {
+      const $found = jquery.$(found[i]);
+
+      // try to find the temporal data
+      const rawDate = $found.find('.recommendation_type_ctn > span').clone().children().remove().end().text();
+      let split = rawDate.trim().replace(',', '').split(' ');
+      let day = pad(split[1]);
+      let month = moment().month(split[0]).format('MM');
+      let year = split[2]; // might not exist
+
+      if(split.length === 2) { // if it doesn't, that means this year
+        year = CURRENT_YEAR
       }
 
-      callback(ids);
+      let rfc2822 = `${year}-${month}-${day}`;
+
+      ids.push({
+        appid: $found.attr('data-ds-appid'),
+        recommended: $found.find('.color_recommended').length > 0, // if this span is found, they recommended it
+        info: $found.find('.color_informational').length > 0, // if this span is found, it's an info post
+        rawDate: rawDate,
+        epoch: Number(moment(rfc2822)),
+      });
+    }
+
+    callback(ids);
   });
 }
 
@@ -89,7 +111,7 @@ function getCuratorsName(curatorID, callback) {
 }
 
 // now actually do the thing
-require("jsdom").env("", function(err, window) {
+require('jsdom').env('', function(err, window) {
     if (err) {
         console.error(err);
         return;
