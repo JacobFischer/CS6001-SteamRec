@@ -31,7 +31,12 @@ def build_graph(curators_path, games_path):
 	graph = dict()
 
 	# put each game in the graph
+	numGames = len(games)
+	gameCount = 0
 	for gameID, gameData in games.items():
+		print(("%.2f" % (100 * gameCount / numGames)) + '% done', end='\r')
+		gameCount += 1
+
 		graphGame = dict()
 
 		# get the list of IDs of curators that recommend this game and their time-bias
@@ -76,6 +81,7 @@ def build_graph(curators_path, games_path):
 		# add this game to the graph
 		graph[gameID] = graphGame
 
+	print('\nDone!')  # \n to clear the \r in above loop
 	return graph
 
 def predict(graph, tag_ratios, k):
