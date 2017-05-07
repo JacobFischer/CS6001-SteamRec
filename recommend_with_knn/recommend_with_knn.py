@@ -19,14 +19,23 @@ def euclidean_dist(tagRatios1, tagRatios2):
 	# sqrt and return
 	return math.sqrt(s)
 
-def build_graph(curators_path, games_path):
-	# builds and returns a graph of games, their tag ratios, and curators with time weights
-	# this takes about 3 minutes on my laptop
-	with open(curators_path, 'r') as file:
-		curators = json.load(file)
+def get_data(path, ):
+	with open(path, 'r') as file:
+		return json.load(file)
 
-	with open(games_path, 'r') as file:
-		games = json.load(file)
+def build_graph(curators, games, startTime=1411344000000, endTime=1494012977000):
+	"""
+	Builds the graph used in kNN, this is a slow process and will probably take a few minutes A percentage should print as it executes
+
+	Args:
+		curators - the dict of all curators and their recommendations
+		games - the dict of all games (appid) and their metadata such as tags
+		[startTime] - the minimum time to consider, defaults to a date roughly that of the time Steam Curators launched (roughly sept 22 2014)
+		[endTime] - the maximum time to consider, defaults to may 5th, the last time the dataset was recollected (as otherwise we'd penalize games for not being recent if we used the current system time)
+
+	Returns:
+		the graph built for kNN clustering
+	"""
 
 	graph = dict()
 
@@ -49,11 +58,17 @@ def build_graph(curators_path, games_path):
 			if recommendationInfo['info']:
 				# this is an info review, skip this curator
 				continue
+
+			recommendationEpoch = recommendationInfo['epoch']
+			if recommendationEpoch > endTime or recommendationEpoch < startTime:
+				# then the recommendation is out of the range we are considering, so skip it
+				continue
+
 			# get the time bias for this recommendation, calculated as the period between the launch of steam curators (roughly sept 22 2014) and the time of recommendation,
 			# divided by the period between now and the launch of steam curators
 			# this evaluates to near 1 for very recent recommendations and near 0 for very old recommendations
 			# note: the epochs here (and in the json data) are in milliseconds
-			recommendationBias = max(((recommendationInfo['epoch']) - 1411344000000) / (1494012977000 - 1411344000000), 0)
+			recommendationBias = max(((recommendationEpoch) - startTime) / (endTime - startTime), 0)
 
 			# make the bias negative if the recommendation is negative
 			if not recommendationInfo['recommended']:
@@ -107,23 +122,25 @@ def predict(graph, tag_ratios, k):
 if __name__ == '__main__':
 	curatorPath = '../recommend_by_types/curators.json'
 	gamesPath = '../recommend_by_types/games.json'
-	# load the list of curators so we can get the name from the id
-	with open(curatorPath, 'r') as file:
-		curators = json.load(file)
+
+	curators = get_data(curatorPath)
+	games = get_data(gamesPath)
 
 	# build the graph
 	print('Building graph')
-	graph = build_graph(curatorPath, gamesPath)
+
+	graph = build_graph(curators, games)
 	
 	# set up an example game to recommend
-	exampleGameTagRatios = dict()
-	exampleGameTagRatios['Open World'] = 0.2
-	exampleGameTagRatios['RPG'] = 0.2
-	exampleGameTagRatios['Adventure'] = 0.2
-	exampleGameTagRatios['Fantasy'] = 0.2
-	exampleGameTagRatios['Singlepalyer'] = 0.1
-	exampleGameTagRatios['Atmospheric'] = 0.1
-	exampleGameTagRatios['Character Customization'] = 0.1
+	exampleGameTagRatios = {
+		'Open World': 0.2,
+		'RPG': 0.2,
+		'Adventure': 0.2,
+		'Fantasy': 0.2,
+		'Singleplayer': 0.1,
+		'Atmospheric': 0.1,
+		'Character Customization': 0.1
+	}
 
 	# try with different values for k
 	for kTest in [1,2,3,5,10,20,50]:
