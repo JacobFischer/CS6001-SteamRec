@@ -5,7 +5,20 @@
 
 import json
 import math
+import random
+
 import os.path
+
+def sampleRecentRecommendations(curators, games, n, cutoffEpoch):
+	# returns a list of n game ids for games recently recommended by a curator
+	allRecommendations = []
+	for cData in curators.values():
+		for g in cData['list']:
+			if g['recommended'] and not g['info'] and g['epoch'] >= cutoffEpoch and g['appid'] in games.keys():
+				allRecommendations.append(g['appid'])
+	return random.sample(allRecommendations, n)
+
+
 
 def euclidean_dist(tagRatios1, tagRatios2):
 	# compute the euclidean distance between two dictionaries of tag ratios
@@ -24,9 +37,10 @@ def get_data(path):
 	with open(path, 'r') as file:
 		return json.load(file)
 
-def build_graph(curators, games, startTime=1411344000000, endTime=1494012977000, cache=True):
+def build_graph(curators, games, excludedGames=None, startTime=1411344000000, endTime=1494012977000, cache=True):
 	"""
 	Builds the graph used in kNN, this is a slow process and will probably take a few minutes A percentage should print as it executes
+	If exludedGames is not None, then every game ID in excludedGames will be excluded from the graph
 
 	Args:
 		curators - the dict of all curators and their recommendations
@@ -50,11 +64,19 @@ def build_graph(curators, games, startTime=1411344000000, endTime=1494012977000,
 
 	# put each game in the graph
 	numGames = len(games)
+	if excludedGames is not None:
+		numGames -= len(excludedGames)
 	gameCount = 0
 	for gameID, gameData in games.items():
+		# skip this game if we are excluding it
+		if excludedGames is not None and gameID in excludedGames:
+			continue
+
+		# print progress
 		print(("%.2f" % (100 * gameCount / numGames)) + '% done', end='\r')
 		gameCount += 1
 
+		# set up dictionary for game
 		graphGame = dict()
 
 		# get the list of IDs of curators that recommend this game and their time-bias
@@ -86,6 +108,10 @@ def build_graph(curators, games, startTime=1411344000000, endTime=1494012977000,
 			# add this curator-recommendation pair to the list of recommendation
 			recommendations.append((curatorID, recommendationBias))
 
+		# if nobody recommends this game, don't put it in the graph
+		if len(recommendations) == 0:
+			continue
+
 		# add the list of recommendations to this game
 		graphGame['recommendations'] = recommendations
 
@@ -114,8 +140,8 @@ def build_graph(curators, games, startTime=1411344000000, endTime=1494012977000,
 
 	return graph
 
-def predict(graph, tag_ratios, k):
-	# return a predicted curator by looking at the k nearest neighbors of a game given a dictionary of its tag ratios
+def predict(graph, tag_ratios, k, n):
+	# return n predicted curators by looking at the k nearest neighbors of a game given a dictionary of its tag ratios
 	# get the games in the graph
 	neighbors = graph.values()
 	# sort the game list by distance to this list
@@ -129,10 +155,14 @@ def predict(graph, tag_ratios, k):
 			if curatorID not in totalRecommendations.keys():
 				totalRecommendations[curatorID] = 0
 			totalRecommendations[curatorID] += recommendationBias
-	# get the curatorID with the maximum total recommendation
-	recommendedCuratorID = max(totalRecommendations, key=totalRecommendations.get)
+	# sort the curators by max recommendation weight
+	allRecommendingCurators = list(totalRecommendations.keys())
+	allRecommendingCurators.sort(key=lambda c: totalRecommendations[c], reverse=True)
 
-	return recommendedCuratorID
+	# get the top n curators
+	recommendedCuratorIDs = allRecommendingCurators[:n]
+
+	return recommendedCuratorIDs
 
 if __name__ == '__main__':
 	curatorPath = '../recommend_by_types/curators.json'
@@ -141,26 +171,50 @@ if __name__ == '__main__':
 	curators = get_data(curatorPath)
 	games = get_data(gamesPath)
 
+	excludedGames = sampleRecentRecommendations(curators, games, 100, 1488399304000)
+
 	# build the graph
 	print('Building graph')
 
-	graph = build_graph(curators, games)
-	
-	# set up an example game to recommend
-	exampleGameTagRatios = {
-		'Open World': 0.2,
-		'RPG': 0.2,
-		'Adventure': 0.2,
-		'Fantasy': 0.2,
-		'Singleplayer': 0.1,
-		'Atmospheric': 0.1,
-		'Character Customization': 0.1
-	}
+	graph = build_graph(curators, games, excludedGames=excludedGames)
 
-	# try with different values for k
-	for kTest in [1,2,3,5,10,20,50]:
-		print('Testing k value of {0}'.format(str(kTest)))
-		recommendedCuratorID = predict(graph, exampleGameTagRatios, kTest)
-		print('The recommended curator ID is {0}'.format(str(recommendedCuratorID)))
-		recommendedCuratorName = curators[recommendedCuratorID]['name']
-		print('The name of this curator is {0}'.format(recommendedCuratorName))
+
+	# try to recommend the excluded games
+	scores = dict()
+	for test_gID in excludedGames:
+
+		# get the tag ratios for this game
+		gData = games[test_gID]
+		testGameTagRatios = dict()
+		# skip this game if it has no tags
+		if 'tags' not in gData or not gData['tags']:
+			continue
+		totalTags = sum(gData['tags'].values())
+		for tag, numTagged in gData['tags'].items():
+			testGameTagRatios[tag] = numTagged / totalTags
+
+		print('Testing game with ID {0} and name {1}'.format(str(test_gID), gData['name']))
+
+		# try with different values for k
+		for kTest in [1,2,3,5,10,20,50]:
+			for nTest in [1,2,3,5,10]:
+				if (kTest, nTest) not in scores.keys():
+					scores[(kTest, nTest)] = 0
+				print('Testing k value of {0} and n value of {1}'.format(str(kTest), str(nTest)))
+				recommendedCuratorIDs = predict(graph, testGameTagRatios, kTest, nTest)
+				print('The recommended curators are:')
+				for recommendedCuratorID in recommendedCuratorIDs:
+					print('{0}, with name {1}'.format(recommendedCuratorID, curators[recommendedCuratorID]['name']))
+
+				# see if we predicted correctly by getting all the games recommended by these curators
+				allRecommendedGames = []
+				for recommendedCuratorID in recommendedCuratorIDs:
+					allRecommendedGames += list(g['appid'] for g in curators[recommendedCuratorID]['list'])
+				if test_gID in allRecommendedGames:
+					print('At least one of these curators recommends this game')
+					scores[(kTest, nTest)] += 1
+				else:
+					print('None of these curators recommends this game')
+
+
+	print(scores)
