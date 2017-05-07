@@ -5,6 +5,7 @@
 
 import json
 import math
+import os.path
 
 def euclidean_dist(tagRatios1, tagRatios2):
 	# compute the euclidean distance between two dictionaries of tag ratios
@@ -19,11 +20,11 @@ def euclidean_dist(tagRatios1, tagRatios2):
 	# sqrt and return
 	return math.sqrt(s)
 
-def get_data(path, ):
+def get_data(path):
 	with open(path, 'r') as file:
 		return json.load(file)
 
-def build_graph(curators, games, startTime=1411344000000, endTime=1494012977000):
+def build_graph(curators, games, startTime=1411344000000, endTime=1494012977000, cache=True):
 	"""
 	Builds the graph used in kNN, this is a slow process and will probably take a few minutes A percentage should print as it executes
 
@@ -36,6 +37,14 @@ def build_graph(curators, games, startTime=1411344000000, endTime=1494012977000)
 	Returns:
 		the graph built for kNN clustering
 	"""
+
+	# check if we cached this graph
+	if cache:
+		cached_filename = './cached-{}-{}.json'.format(startTime, endTime)
+		if os.path.isfile(cached_filename):
+			print("loading graph from cached file " + cached_filename)
+			# load it from the cache
+			return get_data(cached_filename)
 
 	graph = dict()
 
@@ -97,6 +106,12 @@ def build_graph(curators, games, startTime=1411344000000, endTime=1494012977000)
 		graph[gameID] = graphGame
 
 	print('\nDone!')  # \n to clear the \r in above loop
+
+	# if we are cacheing, cache it
+	if cache:
+		with open(cached_filename, 'w') as file:
+			json.dump(graph, file)
+
 	return graph
 
 def predict(graph, tag_ratios, k):
