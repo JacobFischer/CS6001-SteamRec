@@ -165,8 +165,8 @@ def predict(graph, tag_ratios, k, n):
 	return recommendedCuratorIDs
 
 if __name__ == '__main__':
-	curatorPath = '../recommend_by_types/curators.json'
-	gamesPath = '../recommend_by_types/games.json'
+	curatorPath = 'curators.json'
+	gamesPath = 'games.json'
 
 	curators = get_data(curatorPath)
 	games = get_data(gamesPath)
